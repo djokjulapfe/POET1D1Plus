@@ -13,7 +13,7 @@
  *  Brisanje celog ekrana
  *  Crtanje ekvipotencijale i linije elektricnog polja
  *  Crtanje vektorskog elektricnog polja
- *  *Cuvanje i ucitavanje slike ili krive
+ *  Cuvanje i ucitavanje slike ili krive
  *  *Help stranica
  *  *Osnovne komande za kontrolu linija (brisanje, pomeranje, dupliranje...)
  * Uputstvo:
@@ -34,12 +34,15 @@
  *      Atan mod - Vektori imaju duzinu k*atan(c*|E|)
  *  V - Prikazuje jednu ekvipotencijalu ili liniju elektricnog polja
  *      (Pritiskom na dugme B se menja) koja prolazi kroz polozaj kursora
- *  *S/L - Cuvanje/Otvaranje slike ili krive (Pritiskom na dugme D se menja)
+ *  S/L - Cuvanje/Otvaranje slike ili krive (Pritiskom na dugme D se menja)
  *  *H - Prikazuje stranicu "Help" (Pritiskom na dugme J se menja jezik)
  *  *Q - Prikazuje liniju najblizu misu
  *  *X - brise liniju najblizu misu
  *  *CTRL + Z/X/C/V - UNDO/CUT/COPY/PASTE
  *  *F - Selektuje liniju najblizu misu da bi mogla da se pomera
+ *
+ *  *ruler
+ *  *UI
  *
  * Zauzeti dugmici:
  *   WER
@@ -48,6 +51,8 @@
  */
 
 import javax.swing.*;
+import javax.swing.filechooser.*;
+import java.io.*;
 
 ArrayList<ArrayList<PVector>> L; // Lista vektora koja pretstavlja nit
 
@@ -431,25 +436,62 @@ void keyPressed() { // Pri pritisku na dugme na tastaturi
       println(save + ".png");
       save(save + ".png");
     } else {
-      PrintWriter P = createWriter(save + ".txt");
-      for (int i = 0; i < L.size(); i++) {
-        for (int j = 0; j < L.get(i).size(); j++) {
-          P.println(L.get(i).get(j).x + " " + L.get(i).get(j).y);
+      JFileChooser jfc = new JFileChooser();
+      int retrival = jfc.showSaveDialog(null);
+      if (retrival == JFileChooser.APPROVE_OPTION) {
+        try {
+          String file = jfc.getSelectedFile().getAbsolutePath();
+          FileWriter fw;
+          if (file.charAt(file.length() - 1) == 't' &&
+              file.charAt(file.length() - 2) == 'x' &&
+              file.charAt(file.length() - 3) == 't' &&
+              file.charAt(file.length() - 4) == '.')
+            fw = new FileWriter(jfc.getSelectedFile());
+          else fw = new FileWriter(jfc.getSelectedFile()+".txt");
+          for (int i = 0; i < L.size(); i++) {
+            for (int j = 0; j < L.get(i).size(); j++) {
+              //P.println(L.get(i).get(j).x + "\t" + L.get(i).get(j).y);
+              fw.write(L.get(i).get(j).x + "\t" + L.get(i).get(j).y + "\n");
+            }
+            fw.write("END\n");
+          }
+          fw.flush();
+          fw.close();
+          println(save + ".txt");
         }
-        P.println();
+        catch (Exception ex) {
+          ex.printStackTrace();
+        }
       }
-      P.flush();
-      P.close();
     }
   }
   if (key == 'l') {
     JFileChooser jfc = new JFileChooser();
+    FileNameExtensionFilter filter = new FileNameExtensionFilter( "txt files", "txt");
+    jfc.setFileFilter(filter);
     int returnVal = jfc.showOpenDialog(null);
     if (returnVal == JFileChooser.APPROVE_OPTION) {
       String file = jfc.getSelectedFile().getAbsolutePath();
       println("The file you have chosen: " + file);
       BufferedReader R = createReader(file);
-      
+      String line;
+      L = new ArrayList<ArrayList<PVector>>();
+      do {
+        try {
+          line = R.readLine();
+        } 
+        catch (IOException e) {
+          line = null;
+        }
+        if (line != null) {
+          String[] pieces = split(line, TAB);
+          if (pieces[0].equals("END")) {
+            L.add(new ArrayList<PVector>());
+          } else if (pieces.length == 2) {
+            L.get(L.size()-1).add(new PVector(float(pieces[0]), float(pieces[1])));
+          }
+        }
+      } while (line != null);
     }
   }
   if (key == 'd') {
