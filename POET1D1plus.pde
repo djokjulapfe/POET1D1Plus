@@ -174,7 +174,7 @@ class Line {
       float dV = 1.0/4/PI/e0 * Qp * dl / r.mag(); // "Diferencijal" napona
       PVector rn = new PVector(r.x, r.y);
       rn.normalize(); // Ort vektor vektora r
-      PVector dE = PVector.mult(rn, (Qs?1:-1) *1.0/4/PI/e0 * Qp * dl / sq(r.mag())); // "Diferencijal" vektora elektricnog polja
+      PVector dE = PVector.mult(rn, (!Qs?1:-1) *1.0/4/PI/e0 * Qp * dl / sq(r.mag())); // "Diferencijal" vektora elektricnog polja
       dE.z = dV;
       // Integraljenje:
       EV.add(dE);
@@ -189,7 +189,7 @@ class Line {
       PVector r = PVector.sub(L.get(dli), pos); // Vektor udaljenosti delica putanje i tacke M
       PVector rn = new PVector(r.x, r.y);
       rn.normalize(); // Ort vektor vektora r
-      PVector dE = PVector.mult(rn, (Qs?1:-1) *1.0/4/PI/e0 * Qp * dl / sq(r.mag())); // "Diferencijal" vektora elektricnog polja
+      PVector dE = PVector.mult(rn, (!Qs?1:-1) *1.0/4/PI/e0 * Qp * dl / sq(r.mag())); // "Diferencijal" vektora elektricnog polja
       // Integraljenje:
       EV.add(dE);
     }
@@ -239,6 +239,10 @@ class Line {
 
   void dec() {
     Qp /= 1.1;
+  }
+  
+  void neg() {
+    Qs = !Qs;
   }
 }
 
@@ -488,10 +492,17 @@ class System {
       if (key == '+') {
         sel.inc();
         m.update(L);
+        e.update(L);
       }
       if (key == '-') {
         sel.dec();
         m.update(L);
+        e.update(L);
+      }
+      if (key == '*') {
+        sel.neg();
+        m.update(L);
+        e.update(L);
       }
     }
     if (b.get(0).state) ld();
@@ -572,7 +583,7 @@ class System {
     PVector E = new PVector(EV.x, EV.y);
     drawVector(M, E);
     textAlign(LEFT, BOTTOM);
-    text("U = \t" + nfplus(EV.z, 1, 2) + "V\nE = " + nfplus(E.mag(), 1, 2) + "V/m\n" + (sel!=null?("Q\' = " + nfplus(sel.Qp, 1, 2) + "C/m"):""), Width + 1, Height-5);
+    text("U = \t" + nfplus(EV.z, 1, 2) + "V\nE = " + nfplus(E.mag(), 1, 2) + "V/m\n" + (sel!=null?("Q\' = " + (sel.Qs?"":"-") + nfplus(sel.Qp, 1, 2) + "C/m"):""), Width + 1, Height-5);
 
     if (s.get(4).state) {
       fill(255, 200, 200, 200);
