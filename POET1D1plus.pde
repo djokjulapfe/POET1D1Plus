@@ -32,22 +32,16 @@
  *  W - Menja mod za crtanje elektricnog polja:
  *      Normalizovani - svi vektori su iste duzine
  *      Atan mod - Vektori imaju duzinu k*atan(c*|E|)
- *  V - Prikazuje jednu ekvipotencijalu ili liniju elektricnog polja
+ *  *V - Prikazuje jednu ekvipotencijalu ili liniju elektricnog polja
  *      (Pritiskom na dugme B se menja) koja prolazi kroz polozaj kursora
  *  S/L - Cuvanje/Otvaranje slike ili krive (Pritiskom na dugme D se menja)
- *  *H - Prikazuje stranicu "Help" (Pritiskom na dugme J se menja jezik)
- *  *Q - Prikazuje liniju najblizu misu
+ *  H - Prikazuje stranicu "Help" (Pritiskom na dugme J se menja jezik)
+ *  Q - Prikazuje liniju najblizu misu
  *  *X - brise liniju najblizu misu
  *  *CTRL + Z/X/C/V - UNDO/CUT/COPY/PASTE
  *  *F - Selektuje liniju najblizu misu da bi mogla da se pomera
- *
  *  *ruler
- *  *UI
  *
- * Zauzeti dugmici:
- *   WER
- *  A
- *    CVB
  */
 
 import javax.swing.*;
@@ -82,8 +76,13 @@ int ekviDist = 1000; // Duzina linije ekvi;
 
 boolean saveMode; // Flag za cuvanje slike/vektorski linije
 boolean pmousePressed; // Prethodno stanje mousePressed promenljive
+boolean pkeyPressed; // Prethodno stanje keyPressed promenljive
 boolean circleMode; // Flag za crtanje krugova
 float circleRadius = 1; // Poluprecnik kruga
+float mX, mY;
+int Width;
+int Height;
+int ButtonNo;
 
 final float VoltScale = 0.005;
 final float e0 = 8.8542e-12; // Permitivnost vakuma/vazduha [F/m]
@@ -91,38 +90,538 @@ final float scale = 100; // Odnos metara i piksela
 final float dmin = 1e-2; // najmanja duzina (u metrima) dela puta
 final float dmax = 1e-1; // najveca duzina (u metrima) dela puta
 
+class Switch {
+  Boolean state;
+  String text;
+  PVector pos;
+
+  Switch(String text) {
+    state = false;
+    pos = new PVector(Width + 50, ButtonNo * 60 - 30);
+    ButtonNo++;
+    this.text = text;
+  }
+
+  void update() {
+    if (mousePressed && !pmousePressed) {
+      if (mouseX > pos.x-30 && mouseX < pos.x+30 && mouseY > pos.y && mouseY < pos.y + 20) state = !state;
+    }
+  }
+
+  void draw() {
+    
+    strokeWeight(1);
+    fill(0);
+    textAlign(CENTER, BOTTOM);
+    text(text, pos.x, pos.y - 5);
+
+    fill(255, 0, 0);
+    rect(pos.x - 30, pos.y, 30, 20);
+    fill(0, 255, 0);
+    rect(pos.x, pos.y, 30, 20);
+
+    fill(255);
+    rect(pos.x - (state?30:0), pos.y, 30, 20);
+  }
+}
+
+class Button {
+  boolean state;
+  String text;
+  PVector pos;
+
+  Button(String text) {
+    state = false;
+    pos = new PVector(Width + 50, ButtonNo * 60 - 30);
+    ButtonNo++;
+    this.text = text;
+  }
+
+  void update() {
+    state = false;
+    if (mousePressed && !pmousePressed) {
+      if (mouseX > pos.x-30 && mouseX < pos.x+30 && mouseY > pos.y && mouseY < pos.y + 20) state = !state;
+    }
+  }
+
+  void draw() {
+    fill(0);
+    textAlign(CENTER, BOTTOM);
+    text(text, pos.x, pos.y - 5);
+
+    fill(state?255:0);
+    rect(pos.x - 30, pos.y, 60, 20);
+  }
+}
+
+class Line {
+  ArrayList<PVector> L;
+  float Qp;
+  boolean Qs; // Sign of Qp
+  boolean selected;
+
+  Line() {
+    L = new ArrayList<PVector>();
+    Qp = 3e-9;
+    Qs = true;
+  }
+
+  PVector getEV(PVector pos) {
+    PVector EV = new PVector();
+    for (int dli = 0; dli < L.size() - 1; dli++) { // Prolaz kroz sve clanove liste L
+      float dl = PVector.sub(L.get(dli), L.get(dli+1)).mag(); // Duzina delica putanje
+      PVector r = PVector.sub(L.get(dli), pos); // Vektor udaljenosti delica putanje i tacke M
+      float dV = 1.0/4/PI/e0 * Qp * dl / r.mag(); // "Diferencijal" napona
+      PVector rn = new PVector(r.x, r.y);
+      rn.normalize(); // Ort vektor vektora r
+      PVector dE = PVector.mult(rn, (Qs?1:-1) *1.0/4/PI/e0 * Qp * dl / sq(r.mag())); // "Diferencijal" vektora elektricnog polja
+      dE.z = dV;
+      // Integraljenje:
+      EV.add(dE);
+    }
+    return EV;
+  }
+
+  PVector getE(PVector pos) {
+    PVector EV = new PVector();
+    for (int dli = 0; dli < L.size() - 1; dli++) { // Prolaz kroz sve clanove liste L
+      float dl = PVector.sub(L.get(dli), L.get(dli+1)).mag(); // Duzina delica putanje
+      PVector r = PVector.sub(L.get(dli), pos); // Vektor udaljenosti delica putanje i tacke M
+      PVector rn = new PVector(r.x, r.y);
+      rn.normalize(); // Ort vektor vektora r
+      PVector dE = PVector.mult(rn, (Qs?1:-1) *1.0/4/PI/e0 * Qp * dl / sq(r.mag())); // "Diferencijal" vektora elektricnog polja
+      // Integraljenje:
+      EV.add(dE);
+    }
+    return EV;
+  }
+
+  float getV(PVector pos) {
+    float V = 0;
+    for (int dli = 0; dli < L.size() - 1; dli++) { // Prolaz kroz sve clanove liste L
+      float dl = PVector.sub(L.get(dli), L.get(dli+1)).mag(); // Duzina delica putanje
+      PVector r = PVector.sub(L.get(dli), pos); // Vektor udaljenosti delica putanje i tacke M
+      float dV = 1.0/4/PI/e0 * Qp * dl / r.mag(); // "Diferencijal" napona
+      // Integraljenje:
+      V += dV;
+    }
+    return V;
+  }
+
+  float getDist(PVector v) {
+    float ret = 1e5;
+    for (PVector l : L) {
+      float d = dist(v.x, v.y, l.x, l.y);
+      ret = d < ret ? d : ret;
+    }
+    return ret;
+  }
+
+  void draw(boolean bold) {
+    if (bold)strokeWeight(2);
+    else strokeWeight(1);
+    stroke(0);
+    for (int i = 0; i < L.size()-1; i++) {
+      PVector a = L.get(i);
+      PVector b = L.get(i+1);
+      line(a.x*scale, a.y*scale, b.x*scale, b.y*scale);
+    }
+  }
+
+  void addNewSegment(PVector v) {
+    L.add(v);
+    optimizeL(L);
+  }
+
+  void inc() {
+    Qp *= 1.1;
+  }
+
+  void dec() {
+    Qp /= 1.1;
+  }
+}
+
+class Ekvi {
+  ArrayList<PVector> L;
+  Switch we;
+
+  Ekvi() {
+    L = new ArrayList<PVector>();
+    we = new Switch("Ekvi");
+  }
+
+  void calcWE(ArrayList<Line> Lp) {
+    if (!we.state) calcEkvi(Lp);
+    else calcLin(Lp);
+  }
+
+  void calcLin(ArrayList<Line> Lp) {
+    L = new ArrayList<PVector>();
+    PVector c = new PVector(mX/scale, mY/scale);
+    L.add(c);
+    PVector tE;
+    for (int i = 0; i < ekviDist; i++) {
+      tE = new PVector();
+      for (int j = 0; j < Lp.size(); j++) {
+        tE.add(Lp.get(j).getE(L.get(L.size()-1)));
+      }
+      tE.setMag(0.01);
+      L.add(PVector.add(L.get(L.size()-1), tE));
+    }
+    L.add(c);
+    for (int i = 0; i < ekviDist; i++) {
+      tE = new PVector();
+      for (int j = 0; j < Lp.size(); j++) {
+        tE.add(Lp.get(j).getE(L.get(L.size()-1)));
+      }
+      tE.rotate(-PI);
+      tE.setMag(0.01);
+      L.add(PVector.add(L.get(L.size()-1), tE));
+    }
+  }
+
+  void calcEkvi(ArrayList<Line> Lp) {
+    L = new ArrayList<PVector>();
+    PVector c = new PVector(mX/scale, mY/scale);
+    L.add(c);
+    PVector tE;
+    for (int i = 0; i < ekviDist; i++) {
+      tE = new PVector();
+      for (int j = 0; j < Lp.size(); j++) {
+        tE.add(Lp.get(j).getE(L.get(L.size()-1)));
+      }
+      tE.rotate(HALF_PI);
+      tE.setMag(0.01);
+      L.add(PVector.add(L.get(L.size()-1), tE));
+    }
+    L.add(c);
+    for (int i = 0; i < ekviDist; i++) {
+      tE = new PVector();
+      for (int j = 0; j < Lp.size(); j++) {
+        tE.add(Lp.get(j).getE(L.get(L.size()-1)));
+      }
+      tE.rotate(-HALF_PI);
+      tE.setMag(0.01);
+      L.add(PVector.add(L.get(L.size()-1), tE));
+    }
+  }
+  
+  void update(ArrayList<Line> Lp) {
+    calcWE(Lp);
+  }
+
+  void draw() {
+    PVector a;
+    for (int i = 0; i < L.size()-1; i+=5) {
+      a = L.get(i);
+      stroke(50);
+      strokeWeight(3);
+      point(a.x*scale, a.y*scale);
+      strokeWeight(1);
+    }
+  }
+}
+
+class Map {
+  PImage map;
+  Switch showMap;
+
+  Map() {
+    showMap = new Switch("Show Map");
+    map = createImage(Width, Height, RGB);
+  }
+
+  void update(ArrayList<Line> L) {
+    map = createImage(Width, Height, RGB);
+    map.loadPixels();
+    for (int x = 2; x < Width; x += 5) {
+      for (int y = 2; y < Height; y += 5) {
+        float tV = 0;
+        for (int i = 0; i < L.size(); i++) {
+          tV += L.get(i).getV(new PVector(x/scale, y/scale));
+        }
+        for (int xp = x-2; xp < x+3; xp++) {
+          for (int yp = y-2; yp < y+3; yp++) {
+            map.pixels[yp*Width + xp] = lerpc(VoltScale*tV);
+          }
+        }
+      }
+    }
+    map.updatePixels();
+  }
+
+  void draw() {
+    if (showMap.state) {
+      image(map, 0, 0);
+      fill(0);
+      stroke(0);
+      rect(Width - 20, Height/2 - 50, 20, 100);
+      line(Width - 20, Height/2 - 50, Width - 25, Height/2 - 50);
+      line(Width - 20, Height/2, Width - 25, Height/2);
+      line(Width - 20, Height/2 + 50, Width - 25, Height/2 + 50);
+      for (float i = 0.04; i < 3.96; i+= 0.04) {
+        stroke(lerpc(i));
+        line(Width - 19, Height/2 + 50 - map(i, 0, 4, 0, 100), Width - 2, Height/2 + 50 - map(i, 0, 4, 0, 100));
+      }
+      textAlign(RIGHT, BOTTOM);
+      text("0V", Width - 25, Height/2 + 50);
+      textAlign(RIGHT, CENTER);
+      text(int(2/VoltScale) + "V", Width - 25, Height/2 );
+      textAlign(RIGHT, TOP);
+      text(int(4/VoltScale) + "V", Width - 25, Height/2 - 50);
+    }
+  }
+}
+
+class Vfield {
+  PVector[][] V;
+  int w, h;
+  Switch ef;
+  Switch show;
+
+  Vfield() {
+    w = Width / 20;
+    h = Height / 20;
+    V = new PVector[h][w];
+    show = new Switch("Show field");
+    ef = new Switch("Field mode");
+  }
+
+  void update(ArrayList<Line> L) {
+    V = new PVector[h][w];
+    for (int x = 0; x < Width/20; x++) {
+      for (int y = 0; y < Height/20; y++) {
+        float tx = 20*x/scale;
+        float ty = 20*y/scale;
+        PVector tE = new PVector();
+        for (int i = 0; i < L.size(); i++) {
+          tE.add(L.get(i).getE(new PVector(tx, ty)));
+        }
+        if (ef.state) tE.normalize();
+        else {
+          tE.setMag(atan(tE.mag()*0.005)/HALF_PI);
+        }
+        V[y][x] = tE;
+      }
+    }
+  }
+
+  void draw() {
+    if (show.state) {
+      for (int x = 0; x < w; x++) {
+        for (int y = 0; y < h; y++) {
+          float tx = 20*x/scale;
+          float ty = 20*y/scale;
+          stroke(0);
+          drawVector(new PVector(tx, ty), PVector.mult(V[y][x], 30));
+        }
+      }
+    }
+  }
+}
+
+class System {
+  ArrayList<Line> L;
+  ArrayList<Switch> s;
+  ArrayList<Button> b;
+  Map m;
+  Vfield e;
+  Ekvi ekvi;
+  PVector M;
+  PVector EV;
+  Line sel;
+  String HelpEn;
+  String HelpRs;
+
+  System() {
+    ButtonNo = 1;
+    L = new ArrayList<Line>();
+    s = new ArrayList<Switch>();
+    b = new ArrayList<Button>();
+    m = new Map();
+    m.update(L);
+    e = new Vfield();
+    e.update(L);
+    ekvi = new Ekvi();
+    M = new PVector(2, 2);
+    EV = new PVector();
+    addNewLine();
+    s.add(m.showMap);
+    s.add(e.ef);
+    s.add(e.show);
+    s.add(ekvi.we);
+    s.add(new Switch("Help"));
+    s.add(new Switch("Language"));
+    b.add(new Button("Load"));
+    b.add(new Button("Save"));
+
+    HelpEn = "This is a visualizer for common notions in electrostatics.\n" +
+      "For drawing lines use the left mouse button.\n" +
+      "Optionally use CTRL for snap to grid feature or SHIFT for straight lines.\n" +
+      "You can enter circle drawing mode by pressing C (use mouse wheel for changing radius).\n" +
+      "In the bottom right corner, there is data about the electric potential,\nelectric field vector and the linear charge of the line closest to the cursor.\n" + 
+      "Using + and - you can increse or decrese the charge on the line closest to the mouse.\n" +
+      "With the buttons on the right, you can show the map of electric potential,\nelectric vector field or this help page.\n" +
+      "Using Load and Save you can save a text file containing information about the drawn lines.\n" +
+      "Pressing S, you can save the current image.\n";
+
+    HelpRs = "Ovo je vizuelizator za česte pojame elektrostatike.\n" +
+      "Za crtanje linija koristite levo dugme miša.\n" +
+      "Držanjem CTRL možete uključiti snap to grid opciju, a sa SHIFT možete crtati prave linije.\n" +
+      "Možete uključiti mod za crtanje krugova pritiskom na C (Koristite kružić na mišu za menjanje prečnika).\n" +
+      "U donjem desnom uglu, postoje podaci o potencijalu,\nelektričnom polju i podužnom naelektrisanju linije najbliže kursoru.\n" + 
+      "Korišćenjem + i -, možete povećati ili smanjiti naelektrisanje na liniji najbližoj kursoru\n" +
+      "Pomoću dugmića sa desne strane, možete prikazati mapu potencijala,\nvektorsko polje vektora električnog polja ili ovu stranicu.\n" +
+      "Možete koristiti Load i Save da sačuvate ili otvorite tekstualnu datoteku koja sadrži podatke o nacrtanim linijama.\n" +
+      "Pritiskom na dugme S, možete sačuvati trenutnu sliku.\n";
+  }
+
+  void update() {
+    for (Switch ss : s) {
+      ss.update();
+    }
+    for (Button ss : b) {
+      ss.update();
+    }
+    if (sel != null && keyPressed && !pkeyPressed) {
+      if (key == '+') {
+        sel.inc();
+        m.update(L);
+      }
+      if (key == '-') {
+        sel.dec();
+        m.update(L);
+      }
+    }
+    if (b.get(0).state) ld();
+    if (b.get(1).state) sv();
+    EV = new PVector();
+    for (int i = 0; i < L.size(); i++) {
+      EV.add(L.get(i).getEV(M));
+    }
+    ekvi.update(L);
+    //m.update(L);
+    //e.update(L);
+  }
+
+  void draw() {
+    background(255);
+
+    fill(255);
+    stroke(0);
+    rect(Width, 0, 100-1, Height-1);
+    for (Switch ss : s) {
+      ss.draw();
+    }
+    for (Button ss : b) {
+      ss.draw();
+    }
+
+    m.draw();
+
+    //Iscrtavanje koordinatne ravni:
+    textAlign(LEFT, TOP);
+    fill(0);
+    text("0m", 0, 0);
+
+    textAlign(LEFT, BOTTOM);
+    for (int y = 100; y < Height; y+= 100) {
+      stroke(0);
+      line(0, y, 5, y);
+      text(" " + y/100 + "m", 3, y);
+      stroke(200);
+      line(5, y, Width, y);
+    }
+
+    textAlign(LEFT, CENTER);
+    for (int x = 100; x < Width; x+= 100) {
+      stroke(0);
+      line(x, 0, x, 5);
+      text(" " + x/100 + "m", x, 5);
+      stroke(200);
+      line(x, 5, x, Height);
+    }
+
+    float min = 1;
+    sel = null;
+    for (int i = 0; i < L.size(); i++) {
+      L.get(i).draw(false);
+      float d = L.get(i).getDist(new PVector(mX/scale, mY/scale));
+      if (d < min) {
+        sel = L.get(i);
+        min = d;
+      }
+    }
+    if (sel != null) sel.draw(true);
+
+    e.draw();
+
+    if (circleMode) {
+      stroke(128);
+      noFill();
+      ellipse(mX, mY, circleRadius*2*scale, circleRadius*2*scale);
+    }
+    
+    ekvi.draw();
+
+    strokeWeight(1);
+    fill(0);
+    stroke(0);
+    ellipse(M.x*scale, M.y*scale, 5, 5);
+    PVector E = new PVector(EV.x, EV.y);
+    drawVector(M, E);
+    textAlign(LEFT, BOTTOM);
+    text("U = \t" + nfplus(EV.z, 1, 2) + "V\nE = " + nfplus(E.mag(), 1, 2) + "V/m\n" + (sel!=null?("Q\' = " + nfplus(sel.Qp, 1, 2) + "C/m"):""), Width + 1, Height-5);
+
+    if (s.get(4).state) {
+      fill(255, 200, 200, 200);
+      rect(-1, -1, width + 1, height + 1);
+      fill(0);
+      textSize(15);
+      textAlign(CENTER, CENTER);
+      text(!s.get(5).state?HelpEn:HelpRs, width/2, height/2);
+      textSize(11.5);
+    }
+  }
+
+  void addNewLine() {
+    L.add(new Line());
+  }
+
+  void addNewSegment(PVector v) {
+    L.get(L.size()-1).addNewSegment(v);
+  }
+}
+
+System S;
+
 void init() {
-  Qp = 3e-9; // Pocetno poduzno naelektrisanje niti
-  V = 0; // Vrednost napona pre racunanja
-  // Inicializacija niti
-  dLi = 0;
-  L = new ArrayList<ArrayList<PVector>>();
-  ArrayList<PVector> curL = new ArrayList<PVector>();
-  L.add(curL);
-  E = new PVector(); // Vrednost vektora elektricnog polja pre racunanja
+  S = new System();
 }
 
 void setup() {
   size(900, 600); // Podesava velicinu ekrana
+  Width = 800;
+  Height = 600;
   showMap = false;
-  map = createImage(width, height, RGB);
+  map = createImage(Width, Height, RGB);
   init();
 }
 
 void draw() { // Glavna petlja programa
-
+  /*
   background(255); // boja pozadine (belo)
-  if (showMap) {
-    mapFadeTime += 32;
-    if (mapFadeTime > 255) mapFadeTime = 255;
-  } else {
-    mapFadeTime -= 32;
-    if (mapFadeTime < 0) mapFadeTime = 0;
-  }
-  tint(255, min(mapFadeTime, mapFadeGeneral));
-  image(map, 0, 0);
-
-  float mX, mY;
+   if (showMap) {
+   mapFadeTime += 32;
+   if (mapFadeTime > 255) mapFadeTime = 255;
+   } else {
+   mapFadeTime -= 32;
+   if (mapFadeTime < 0) mapFadeTime = 0;
+   }
+   tint(255, min(mapFadeTime, mapFadeGeneral));
+   image(map, 0, 0);
+   */
   if (keyPressed && key == CODED && keyCode == CONTROL) {
     mX = 50*int(mouseX/50.0 + 0.5);
     mY = 50*int(mouseY/50.0 + 0.5);
@@ -131,172 +630,173 @@ void draw() { // Glavna petlja programa
     mY = mouseY;
   }
 
-  if (mousePressed && !calc) {
+  if (mousePressed && !calc && mouseX < Width) {
     if (mouseButton == LEFT) { // Produzivanje putanje pri pritisku na dugme
       if (circleMode) {
         if (!pmousePressed) {
-          L.add(new ArrayList<PVector>());
+          S.addNewLine();
           float dfi = TWO_PI*0.01;
           for (float fi = 0; fi < TWO_PI + dfi; fi+=dfi) {
-            L.get(L.size()-1).add(new PVector(mX/scale+circleRadius*cos(fi), mY/scale+circleRadius*sin(fi)));
-            optimizeL(L.get(L.size()-1));
+            S.addNewSegment(new PVector(mX/scale+circleRadius*cos(fi), mY/scale+circleRadius*sin(fi)));
           }
-          L.add(new ArrayList<PVector>());
+          S.addNewLine();
         }
       } else {
         if (!pmousePressed && !(keyPressed && key==CODED && (keyCode == SHIFT || keyCode == CONTROL) )) {// Rising edge
-          L.add(new ArrayList<PVector>());
-          mapChanged = true;
+          S.addNewLine();
         }
-        L.get(L.size()-1).add(new PVector(mX/scale, mY/scale));
+        S.addNewSegment(new PVector(mX/scale, mY/scale));
       }
-      optimizeL(L.get(L.size()-1));
     } else if (mouseButton == RIGHT) { // Pomeranje tacke M
-      M.set(mX/scale, mY/scale);
+      S.M.set(mX/scale, mY/scale);
     }
   }
 
-  if (circleMode) {
-    stroke(128);
-    noFill();
-    ellipse(mX, mY, circleRadius*2*scale, circleRadius*2*scale);
+  if (pmousePressed && !mousePressed) {
+    S.m.update(S.L);
+    S.e.update(S.L);
   }
+  /*
+   
+   //Iscrtavanje koordinatne ravni:
+   textAlign(LEFT, TOP);
+   text("0m", 0, 0);
+   
+   stroke(0);
+   textAlign(LEFT, BOTTOM);
+   for (int y = 100; y < Height; y+= 100) {
+   line(0, y, 5, y);
+   text(" " + y/100 + "m", 3, y);
+   stroke(200);
+   line(5, y, Width, y);
+   }
+   
+   stroke(0);
+   textAlign(LEFT, CENTER);
+   for (int x = 100; x < Width; x+= 100) {
+   line(x, 0, x, 5);
+   text(" " + x/100 + "m", x, 5);
+   stroke(200);
+   line(x, 5, x, Height);
+   }
+   
+   if (showMap) {
+   // Crtanje slicice koja se nalazi na desnoj strani
+   fill(0);
+   stroke(0);
+   rect(Width - 20, Height/2 - 50, 20, 100);
+   line(Width - 20, Height/2 - 50, Width - 25, Height/2 - 50);
+   line(Width - 20, Height/2, Width - 25, Height/2);
+   line(Width - 20, Height/2 + 50, Width - 25, Height/2 + 50);
+   for (float i = 0.04; i < 3.96; i+= 0.04) {
+   stroke(lerpc(i));
+   line(Width - 19, Height/2 + 50 - map(i, 0, 4, 0, 100), Width - 2, Height/2 + 50 - map(i, 0, 4, 0, 100));
+   }
+   textAlign(RIGHT, BOTTOM);
+   text("0V", Width - 25, Height/2 + 50);
+   textAlign(RIGHT, CENTER);
+   text(int(2/VoltScale) + "V", Width - 25, Height/2 );
+   textAlign(RIGHT, TOP);
+   text(int(4/VoltScale) + "V", Width - 25, Height/2 - 50);
+   }
+   
+   if (showEr) {
+   Er.loadPixels();
+   for (int x = 0; x < Width/20; x++) {
+   for (int y = 0; y < Height/20; y++) {
+   float tx = 20*x/scale;
+   float ty = 20*y/scale;
+   stroke(0);
+   drawVector(new PVector(tx, ty), (new PVector(red(Er.pixels[y*Width/20 + x])-128, green(Er.pixels[y*Width/20 + x])-128)).mult(0.1));
+   }
+   }
+   }
+   
+   if (showEkvi && L.size() > 1) {
+   PVector a;
+   for (int i = 0; i < ekvi.size()-1; i+=5) {
+   a = ekvi.get(i);
+   stroke(50);
+   strokeWeight(3);
+   point(a.x*scale, a.y*scale);
+   strokeWeight(1);
+   }
+   }
+   
+   stroke(0);
+   // Kraj iscrtavanja koordinatne ravni
+   
+   if (auto) { // Racunanje
+   PVector tE = new PVector();
+   float tV = 0;
+   for (int i = 0; i < L.size(); i++) {
+   calcStuff(L.get(i), M);
+   tE.add(E);
+   tV += V;
+   }
+   E.set(tE);
+   V = tV;
+   }
+   
+   if (L.get(dLi).size() < 3) {
+   dLi ++;
+   if (dLi == L.size()) { 
+   dLi = 0;
+   calc = false;
+   }
+   }
+   
+   if (calc && L.get(dLi).size() > 2 && !auto) {
+   float dl = PVector.sub(L.get(dLi).get(dli), L.get(dLi).get(dli+1)).mag(); // Duzina delica putanje
+   PVector r = PVector.sub(L.get(dLi).get(dli), M); // Vektor udaljenosti delica putanje i tacke M
+   float dV = 1.0/4/PI/e0 * Qp * dl / r.mag(); // "Diferencijal" napona
+   PVector rn = new PVector(r.x, r.y);
+   rn.normalize(); // Ort vektor vektora r
+   line(M.x * scale, M.y * scale, (M.x + r.x) * scale, (M.y + r.y) * scale); // Iscrtavanje procesa racunanja
+   PVector dE = PVector.mult(rn, 1.0/4/PI/e0 * Qp * dl / sq(r.mag())); // "Diferencijal" vektora elektricnog polja
+   // Integraljenje:
+   V += dV;
+   E.add(dE);
+   // Iteriranje:
+   dli++;
+   if (dli == L.get(dLi).size() - 2) {
+   dli = 0;
+   dLi ++;
+   if (dLi == L.size()) {
+   dLi = 1;
+   calc = false;
+   }
+   }
+   }
+   
+   // Crtanje niti i racunanje duzine:
+   len = 0;
+   for (int Li = 0; Li < L.size(); Li++) {
+   for (int i = 0; i < L.get(Li).size()-1; i++) {
+   PVector a = L.get(Li).get(i);
+   PVector b = L.get(Li).get(i+1);
+   line(a.x*scale, a.y*scale, b.x*scale, b.y*scale);
+   len += PVector.sub(a, b).mag();
+   }
+   }
+   
+   if (keyPressed && key==CODED && keyCode == SHIFT && L.size()>1 && L.get(L.size()-1).size() > 0) {
+   PVector last = L.get(L.size() - 1).get(L.get(L.size()-1).size() - 1);
+   stroke(128);
+   line(last.x*scale, last.y*scale, mouseX, mouseY);
+   }
+   
+   //Iscrtavanje:
+   fill(0);
+   ellipse(M.x*scale, M.y*scale, 5, 5);
+   drawVector(M, E);
+   textAlign(LEFT, BOTTOM);
+   text("U = \t" + nfplus(V, 1, 3) + "V\nE = " + nfplus(E.mag(), 1, 3) + "V/m\nQ\' = " + nfplus(Qp, 1, 3) + "C/m\nAutomatic: " + auto, 5, Height-5);*/
 
-  //Iscrtavanje koordinatne ravni:
-  textAlign(LEFT, TOP);
-  text("0m", 0, 0);
-
-  stroke(0);
-  textAlign(LEFT, BOTTOM);
-  for (int y = 100; y < height; y+= 100) {
-    line(0, y, 5, y);
-    text(" " + y/100 + "m", 3, y);
-    stroke(200);
-    line(5, y, width, y);
-  }
-
-  stroke(0);
-  textAlign(LEFT, CENTER);
-  for (int x = 100; x < width; x+= 100) {
-    line(x, 0, x, 5);
-    text(" " + x/100 + "m", x, 5);
-    stroke(200);
-    line(x, 5, x, height);
-  }
-
-  if (showMap) {
-    // Crtanje slicice koja se nalazi na desnoj strani
-    fill(0);
-    stroke(0);
-    rect(width - 20, height/2 - 50, 20, 100);
-    line(width - 20, height/2 - 50, width - 25, height/2 - 50);
-    line(width - 20, height/2, width - 25, height/2);
-    line(width - 20, height/2 + 50, width - 25, height/2 + 50);
-    for (float i = 0.04; i < 3.96; i+= 0.04) {
-      stroke(lerpc(i));
-      line(width - 19, height/2 + 50 - map(i, 0, 4, 0, 100), width - 2, height/2 + 50 - map(i, 0, 4, 0, 100));
-    }
-    textAlign(RIGHT, BOTTOM);
-    text("0V", width - 25, height/2 + 50);
-    textAlign(RIGHT, CENTER);
-    text(int(2/VoltScale) + "V", width - 25, height/2 );
-    textAlign(RIGHT, TOP);
-    text(int(4/VoltScale) + "V", width - 25, height/2 - 50);
-  }
-
-  if (showEr) {
-    Er.loadPixels();
-    for (int x = 0; x < width/20; x++) {
-      for (int y = 0; y < height/20; y++) {
-        float tx = 20*x/scale;
-        float ty = 20*y/scale;
-        stroke(0);
-        drawVector(new PVector(tx, ty), (new PVector(red(Er.pixels[y*width/20 + x])-128, green(Er.pixels[y*width/20 + x])-128)).mult(0.1));
-      }
-    }
-  }
-
-  if (showEkvi && L.size() > 1) {
-    PVector a;
-    for (int i = 0; i < ekvi.size()-1; i+=5) {
-      a = ekvi.get(i);
-      stroke(50);
-      strokeWeight(3);
-      point(a.x*scale, a.y*scale);
-      strokeWeight(1);
-    }
-  }
-
-  stroke(0);
-  // Kraj iscrtavanja koordinatne ravni
-
-  if (auto) { // Racunanje
-    PVector tE = new PVector();
-    float tV = 0;
-    for (int i = 0; i < L.size(); i++) {
-      calcStuff(L.get(i), M);
-      tE.add(E);
-      tV += V;
-    }
-    E.set(tE);
-    V = tV;
-  }
-
-  if (L.get(dLi).size() < 3) {
-    dLi ++;
-    if (dLi == L.size()) { 
-      dLi = 0;
-      calc = false;
-    }
-  }
-
-  if (calc && L.get(dLi).size() > 2 && !auto) {
-    float dl = PVector.sub(L.get(dLi).get(dli), L.get(dLi).get(dli+1)).mag(); // Duzina delica putanje
-    PVector r = PVector.sub(L.get(dLi).get(dli), M); // Vektor udaljenosti delica putanje i tacke M
-    float dV = 1.0/4/PI/e0 * Qp * dl / r.mag(); // "Diferencijal" napona
-    PVector rn = new PVector(r.x, r.y);
-    rn.normalize(); // Ort vektor vektora r
-    line(M.x * scale, M.y * scale, (M.x + r.x) * scale, (M.y + r.y) * scale); // Iscrtavanje procesa racunanja
-    PVector dE = PVector.mult(rn, 1.0/4/PI/e0 * Qp * dl / sq(r.mag())); // "Diferencijal" vektora elektricnog polja
-    // Integraljenje:
-    V += dV;
-    E.add(dE);
-    // Iteriranje:
-    dli++;
-    if (dli == L.get(dLi).size() - 2) {
-      dli = 0;
-      dLi ++;
-      if (dLi == L.size()) {
-        dLi = 1;
-        calc = false;
-      }
-    }
-  }
-
-  // Crtanje niti i racunanje duzine:
-  len = 0;
-  for (int Li = 0; Li < L.size(); Li++) {
-    for (int i = 0; i < L.get(Li).size()-1; i++) {
-      PVector a = L.get(Li).get(i);
-      PVector b = L.get(Li).get(i+1);
-      line(a.x*scale, a.y*scale, b.x*scale, b.y*scale);
-      len += PVector.sub(a, b).mag();
-    }
-  }
-
-  if (keyPressed && key==CODED && keyCode == SHIFT && L.size()>1 && L.get(L.size()-1).size() > 0) {
-    PVector last = L.get(L.size() - 1).get(L.get(L.size()-1).size() - 1);
-    stroke(128);
-    line(last.x*scale, last.y*scale, mouseX, mouseY);
-  }
-
-  //Iscrtavanje:
-  fill(0);
-  ellipse(M.x*scale, M.y*scale, 5, 5);
-  drawVector(M, E);
-  textAlign(LEFT, BOTTOM);
-  text("U = \t" + nfplus(V, 1, 3) + "V\nE = " + nfplus(E.mag(), 1, 3) + "V/m\nQ\' = " + nfplus(Qp, 1, 3) + "C/m\nAutomatic: " + auto, 5, height-5);
+  S.update();
+  S.draw();
   pmousePressed = mousePressed;
+  pkeyPressed = keyPressed;
 }
 
 void optimizeL(ArrayList<PVector> L) { // Izbacuje previse kratke delove niti, a previse dugacke deli na manje.
@@ -388,11 +888,11 @@ void keyPressed() { // Pri pritisku na dugme na tastaturi
   }
   if (key == '+') { 
     Qp *= 1.1; // Povecava Qp
-    if (showMap) updateMap();
+    //if (showMap) updateMap();
   }
   if (key == '-') {
     Qp *= 0.9; // Smanjuje Qp
-    if (showMap) updateMap();
+    //if (showMap) updateMap();
   }
   if (key == 'a') { // Menja stanje automatskog racuna
     auto = !auto;
@@ -406,7 +906,7 @@ void keyPressed() { // Pri pritisku na dugme na tastaturi
 
     if (showMap && !mapChanged) showMap = false;
     else {
-      updateMap();
+      //updateMap();
     }
   }
   if (key == ENTER) {
@@ -415,12 +915,12 @@ void keyPressed() { // Pri pritisku na dugme na tastaturi
   if (key == 'e') {
     if (showEr && !mapChanged) showEr = false;
     else {
-      calcEr();
+      //calcEr();
     }
   }
   if (key == 'w') {
     ErtoScale = !ErtoScale;
-    if (showEr) calcEr();
+    if (showEr);//calcEr();
   }
   if (key == 'v') {
     showEkvi = !showEkvi;
@@ -432,7 +932,7 @@ void keyPressed() { // Pri pritisku na dugme na tastaturi
   }
   if (key == 's') {
     String save = "Saves/Screenshot from " + year()+"-"+nf(month(), 2, 0)+"-"+nf(day(), 2, 0)+" "+nf(hour(), 2, 0)+"-"+nf(minute(), 2, 0)+"-"+nf(second(), 2, 0);
-    if (saveMode) {
+    if (!saveMode) {
       println(save + ".png");
       save(save + ".png");
     } else {
@@ -443,9 +943,9 @@ void keyPressed() { // Pri pritisku na dugme na tastaturi
           String file = jfc.getSelectedFile().getAbsolutePath();
           FileWriter fw;
           if (file.charAt(file.length() - 1) == 't' &&
-              file.charAt(file.length() - 2) == 'x' &&
-              file.charAt(file.length() - 3) == 't' &&
-              file.charAt(file.length() - 4) == '.')
+            file.charAt(file.length() - 2) == 'x' &&
+            file.charAt(file.length() - 3) == 't' &&
+            file.charAt(file.length() - 4) == '.')
             fw = new FileWriter(jfc.getSelectedFile());
           else fw = new FileWriter(jfc.getSelectedFile()+".txt");
           for (int i = 0; i < L.size(); i++) {
@@ -512,7 +1012,7 @@ void calcLin() {
   for (int i = 0; i < ekviDist; i++) {
     tE = new PVector();
     for (int j = 0; j < L.size(); j++) {
-      calcE(L.get(j), ekvi.get(ekvi.size()-1));
+      //calcE(L.get(j), ekvi.get(ekvi.size()-1));
       tE.add(E);
     }
     tE.setMag(0.01);
@@ -522,7 +1022,7 @@ void calcLin() {
   for (int i = 0; i < ekviDist; i++) {
     tE = new PVector();
     for (int j = 0; j < L.size(); j++) {
-      calcE(L.get(j), ekvi.get(ekvi.size()-1));
+      //calcE(L.get(j), ekvi.get(ekvi.size()-1));
       tE.add(E);
     }
     tE.rotate(-PI);
@@ -539,7 +1039,7 @@ void calcEkvi() {
   for (int i = 0; i < ekviDist; i++) {
     tE = new PVector();
     for (int j = 0; j < L.size(); j++) {
-      calcE(L.get(j), ekvi.get(ekvi.size()-1));
+      //calcE(L.get(j), ekvi.get(ekvi.size()-1));
       tE.add(E);
     }
     tE.rotate(HALF_PI);
@@ -550,37 +1050,13 @@ void calcEkvi() {
   for (int i = 0; i < ekviDist; i++) {
     tE = new PVector();
     for (int j = 0; j < L.size(); j++) {
-      calcE(L.get(j), ekvi.get(ekvi.size()-1));
+      //calcE(L.get(j), ekvi.get(ekvi.size()-1));
       tE.add(E);
     }
     tE.rotate(-HALF_PI);
     tE.setMag(0.01);
     ekvi.add(PVector.add(ekvi.get(ekvi.size()-1), tE));
   }
-}
-
-void calcEr() {
-  Er = createImage(width/20, height/20, RGB);
-  Er.loadPixels();
-  for (int x = 0; x < width/20; x++) {
-    for (int y = 0; y < height/20; y++) {
-      float tx = 20*x/scale;
-      float ty = 20*y/scale;
-      PVector tE = new PVector();
-      for (int i = 0; i < L.size(); i++) {
-        calcE(L.get(i), new PVector(tx, ty));
-        tE.add(E);
-      }
-      if (ErtoScale) tE.normalize();
-      else {
-        tE.setMag(atan(tE.mag()*0.01)/HALF_PI);
-      }
-      Er.pixels[y*width/20 + x] = color(tE.x*128+128, tE.y*128+128, 0);
-    }
-  }
-  Er.updatePixels();
-  showEr = true;
-  mapChanged = false;
 }
 
 color lerpc(float p) {
@@ -599,71 +1075,70 @@ color lerpc(float p) {
   return color(255, 0, 0);
 }
 
-void calcV(ArrayList<PVector> L, PVector pos) {
-  //pocetna vrednost
-  V = 0;
-  for (int dli = 0; dli < L.size() - 1; dli++) { // Prolaz kroz sve clanove liste L
-    float dl = PVector.sub(L.get(dli), L.get(dli+1)).mag(); // Duzina delica putanje
-    PVector r = PVector.sub(L.get(dli), new PVector(pos.x, pos.y)); // Vektor udaljenosti delica putanje i tacke M
-    float dV = 1.0/4/PI/e0 * Qp * dl / r.mag(); // "Diferencijal" napona
-    // Integraljenje:
-    V += dV;
-  }
-}
-
-void calcE(ArrayList<PVector> L, PVector pos) {
-  //pocetna vrednost
-  E = new PVector();
-  for (int dli = 0; dli < L.size() - 1; dli++) { // Prolaz kroz sve clanove liste L
-    float dl = PVector.sub(L.get(dli), L.get(dli+1)).mag(); // Duzina delica putanje
-    PVector r = PVector.sub(L.get(dli), pos); // Vektor udaljenosti delica putanje i tacke M
-    PVector rn = new PVector(r.x, r.y);
-    rn.normalize(); // Ort vektor vektora r
-    PVector dE = PVector.mult(rn, 1.0/4/PI/e0 * Qp * dl / sq(r.mag())); // "Diferencijal" vektora elektricnog polja
-    // Integraljenje:
-    E.add(dE);
-  }
-}
-
-void calcStuff(ArrayList<PVector> L, PVector pos) {
-  //pocetne vrednosti
-  E = new PVector();
-  V = 0;
-  for (int dli = 0; dli < L.size() - 1; dli++) { // Prolaz kroz sve clanove liste L
-    float dl = PVector.sub(L.get(dli), L.get(dli+1)).mag(); // Duzina delica putanje
-    PVector r = PVector.sub(L.get(dli), pos); // Vektor udaljenosti delica putanje i tacke M
-    float dV = 1.0/4/PI/e0 * Qp * dl / r.mag(); // "Diferencijal" napona
-    PVector rn = new PVector(r.x, r.y);
-    rn.normalize(); // Ort vektor vektora r
-    PVector dE = PVector.mult(rn, 1.0/4/PI/e0 * Qp * dl / sq(r.mag())); // "Diferencijal" vektora elektricnog polja
-    // Integraljenje:
-    V += dV;
-    E.add(dE);
-  }
-}
-
-void updateMap() {
-  showMap = true;
-  map = createImage(width, height, RGB);
-  map.loadPixels();
-  for (int x = 2; x < width; x += 5) {
-    for (int y = 2; y < height; y += 5) {
-      float tV = 0;
-      for (int i = 0; i < L.size(); i++) {
-        calcV(L.get(i), new PVector(x/scale, y/scale));
-        tV += V;
-      }
-      V = tV;
-      for (int xp = x-2; xp < x+3; xp++) {
-        for (int yp = y-2; yp < y+3; yp++) {
-          map.pixels[yp*width + xp] = lerpc(VoltScale*V);
+void sv() {
+  String save = "Saves/Screenshot from " + year()+"-"+nf(month(), 2, 0)+"-"+nf(day(), 2, 0)+" "+nf(hour(), 2, 0)+"-"+nf(minute(), 2, 0)+"-"+nf(second(), 2, 0);
+  if (saveMode) {
+    println(save + ".png");
+    save(save + ".png");
+  } else {
+    JFileChooser jfc = new JFileChooser();
+    int retrival = jfc.showSaveDialog(null);
+    if (retrival == JFileChooser.APPROVE_OPTION) {
+      try {
+        String file = jfc.getSelectedFile().getAbsolutePath();
+        FileWriter fw;
+        if (file.charAt(file.length() - 1) == 't' &&
+          file.charAt(file.length() - 2) == 'x' &&
+          file.charAt(file.length() - 3) == 't' &&
+          file.charAt(file.length() - 4) == '.')
+          fw = new FileWriter(jfc.getSelectedFile());
+        else fw = new FileWriter(jfc.getSelectedFile()+".txt");
+        for (int i = 0; i < S.L.size(); i++) {
+          for (int j = 0; j < S.L.get(i).L.size(); j++) {
+            //P.println(L.get(i).get(j).x + "\t" + L.get(i).get(j).y);
+            fw.write(S.L.get(i).L.get(j).x + "\t" + S.L.get(i).L.get(j).y + "\n");
+          }
+          fw.write("END\n");
         }
+        fw.flush();
+        fw.close();
+        println(save + ".txt");
+      }
+      catch (Exception ex) {
+        ex.printStackTrace();
       }
     }
   }
-  map.updatePixels();
-  map.filter(BLUR, 3);
-  mapChanged = false;
+}
+
+void ld() {
+  JFileChooser jfc = new JFileChooser();
+  FileNameExtensionFilter filter = new FileNameExtensionFilter( "txt files", "txt");
+  jfc.setFileFilter(filter);
+  int returnVal = jfc.showOpenDialog(null);
+  if (returnVal == JFileChooser.APPROVE_OPTION) {
+    String file = jfc.getSelectedFile().getAbsolutePath();
+    println("The file you have chosen: " + file);
+    BufferedReader R = createReader(file);
+    String line;
+    S.L = new ArrayList<Line>();
+    do {
+      try {
+        line = R.readLine();
+      } 
+      catch (IOException e) {
+        line = null;
+      }
+      if (line != null) {
+        String[] pieces = split(line, TAB);
+        if (pieces[0].equals("END")) {
+          S.addNewLine();
+        } else if (pieces.length == 2) {
+          S.addNewSegment(new PVector(float(pieces[0]), float(pieces[1])));
+        }
+      }
+    } while (line != null);
+  }
 }
 
 void mouseWheel(MouseEvent event) {
